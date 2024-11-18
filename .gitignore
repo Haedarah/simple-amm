@@ -1,0 +1,22 @@
+# Node.js dependencies
+node_modules/
+
+# Hardhat build artifacts and cache
+artifacts/
+cache/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDE-specific files
+.vscode/
+.idea/
+*.iml
+
+# Generated JSON files for deployment
+deployments/
