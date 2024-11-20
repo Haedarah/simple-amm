@@ -64,7 +64,7 @@ describe("-- AMM Contract --", function () {
         // - chelsea_owner   :   10 WETH,    ~90 ETH,    1,000,000 CHE
     });
 
-    describe("Add Liquidity:", function () {
+    describe("# Add Liquidity:", function () {
         it("Should revert if passed amountA <= 0 or passed amountB <= 0", async function () {
             let amountCHE = 0;
             let amountWETH = 0;
@@ -120,8 +120,7 @@ describe("-- AMM Contract --", function () {
             ).to.be.revertedWith("Insufficient liquidity");
         });
 
-        it("Should add liquidity", async function () {
-
+        it("Should add liquidity, mint LP tokens, and emit events", async function () {
             let amountCHE = await chelseaContract.totalSupply();
             let amountWETH = ethers.parseEther("10");
 
@@ -130,14 +129,15 @@ describe("-- AMM Contract --", function () {
 
             expect(await ammContract.balanceOf(chelsea_owner.address)).to.equal(BigInt("0"));
 
-            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
+            expect(await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH)).to.emit(ammContract, "AddLiquidity")
+                .withArgs(chelsea_owner.address, amountCHE, amountWETH);
 
             expect(await ammContract.balanceOf(chelsea_owner.address)).to.equal(sqrt(amountCHE * amountWETH));
         });
 
     });
 
-    describe("Remove Liquidity:", function () {
+    describe("# Remove Liquidity:", function () {
         it("Should revert if passed liquidity <= 0", async function () {
             await expect(
                 ammContract.connect(chelsea_owner).removeLiquidity(0)
@@ -173,7 +173,7 @@ describe("-- AMM Contract --", function () {
 
             expect(await ammContract.balanceOf(chelsea_owner)).to.equal(liquidityToBe);
 
-            await ammContract.connect(chelsea_owner).removeLiquidity(liquidityToBe);
+            expect(await ammContract.connect(chelsea_owner).removeLiquidity(liquidityToBe)).to.emit(ammContract, "Remove liquidity").withArgs(amountCHE, amountWETH);
 
             expect(await ammContract.balanceOf(chelsea_owner)).to.equal(BigInt("0"));
         });
@@ -191,14 +191,55 @@ describe("-- AMM Contract --", function () {
 
             expect(await ammContract.balanceOf(chelsea_owner)).to.equal(liquidityToBe);
 
-            await ammContract.connect(chelsea_owner).removeLiquidity(liquidityToBe / BigInt("2"));
+            expect(await ammContract.connect(chelsea_owner).removeLiquidity(liquidityToBe / BigInt("2"))).to.emit(ammContract, "Remove liquidity").withArgs(amountCHE, amountWETH);
 
             expect(await ammContract.balanceOf(chelsea_owner)).to.equal(liquidityToBe - (liquidityToBe / BigInt("2")));
         });
+
+        it("Should result in owner profit after multiple swaps", async function () {
+            let amountCHE = await chelseaContract.totalSupply();
+            let amountWETH = ethers.parseEther("10");
+
+            const liquidityToBe = sqrt(amountCHE * amountWETH);
+
+            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
+            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
+
+            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
+
+            expect(await ammContract.balanceOf(chelsea_owner)).to.equal(liquidityToBe);
+
+            // Perform multiple swaps
+            const BAswapAmount = ethers.parseEther("1");
+            const ABswapAmount = ethers.parseEther("90000");
+
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("20"));
+            await chelseaContract.connect(user).approve(ammContract.target, ethers.parseEther("1000000"));
+
+            for (let i = 0; i < 10; i++) {
+                if (i % 2 === 0) {
+                    await ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, BAswapAmount, BigInt("0"));
+                } else {
+                    await ammContract.connect(user).swap(chelseaContract.target, wrappedSepoliaEtherContract.target, ABswapAmount, BigInt("0"));
+                }
+            }
+
+            await chelseaContract.connect(user).approve(ammContract.target, ethers.parseEther("1000000"));
+            await ammContract.connect(user).swap(chelseaContract.target, wrappedSepoliaEtherContract.target, await chelseaContract.balanceOf(user.address), BigInt("0"));
+
+            await ammContract.connect(chelsea_owner).removeLiquidity(liquidityToBe);
+
+            const finalWETHBalance = await wrappedSepoliaEtherContract.balanceOf(chelsea_owner.address);
+            const finalCHEBalance = await chelseaContract.balanceOf(chelsea_owner.address);
+
+            expect(finalWETHBalance).to.be.greaterThan(amountWETH);
+            expect(finalCHEBalance).to.equal(amountCHE);
+        });
+
     });
 
-    describe("Swap B for A:", function () {
-        it("Should revert if passed amountIn <= 0", async function () {
+    describe("# Swap:", function () {
+        it("Should revert if passed tokens are not in the pair", async function () {
             let amountCHE = await chelseaContract.totalSupply();
             let amountWETH = ethers.parseEther("10");
 
@@ -207,13 +248,18 @@ describe("-- AMM Contract --", function () {
 
             await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
 
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("20"));
+
             await expect(
-                ammContract.connect(user).swapBForA(BigInt("0"))
-            ).to.be.revertedWith("Invalid input amount");
+                ammContract.connect(user).swap(ammContract.target, chelseaContract.target, ethers.parseEther("1"), BigInt("0")) //Wrong tokenA
+            ).to.be.revertedWith("Invalid tokenIn");
+            await expect(
+                ammContract.connect(user).swap(chelseaContract.target, ammContract.target, ethers.parseEther("1"), BigInt("0")) //Wrong tokenB
+            ).to.be.revertedWith("Invalid tokenOut");
         });
 
-        it("Should revert if calculated amountOut <= 0", async function () {
-            let amountCHE = ethers.parseEther("0.000000001");
+        it("Should revert if amountOut is less than amountOutMin", async function () {
+            let amountCHE = await chelseaContract.totalSupply();
             let amountWETH = ethers.parseEther("10");
 
             await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
@@ -221,12 +267,12 @@ describe("-- AMM Contract --", function () {
 
             await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
 
-            await expect(
-                ammContract.connect(user).swapBForA(ethers.parseEther("0.000000000000000001"))
-            ).to.be.revertedWith("Insufficient output amount");
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("20"));
+
+            expect(await ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, ethers.parseEther("1"), BigInt("10000"))).to.be.revertedWith("Slippage tolerance exceeded")
         });
 
-        it("Should swap B for A", async function () {
+        it("Should swap tokenA to tokenB and tokenB to tokenA", async function () {
             let amountCHE = await chelseaContract.totalSupply();
             let amountWETH = ethers.parseEther("10");
 
@@ -239,72 +285,19 @@ describe("-- AMM Contract --", function () {
 
             await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("0.005"));
             const amountToBeSent = ethers.parseEther("0.005") * BigInt("998") * await ammContract.reserveA() / (await ammContract.reserveB() * BigInt("1000") + ethers.parseEther("0.005") * BigInt("998"));
-            await ammContract.connect(user).swapBForA(ethers.parseEther("0.005"));
+
+            expect(await ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, ethers.parseEther("0.005"), BigInt("0"))).to.emit(ammContract, "Swap")
+                .withArgs(ethers.parseEther("0.005"), amountToBeSent, wrappedSepoliaEtherContract.target, chelsea_owner.target);
 
             expect(await chelseaContract.balanceOf(user.address)).to.equal(amountToBeSent);
 
-            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("0.005"));
-            await ammContract.connect(user).swapBForA(ethers.parseEther("0.005"));
+            await chelseaContract.connect(user).approve(ammContract.target, amountToBeSent);
 
-            expect(await chelseaContract.balanceOf(user.address)).to.be.lessThan(amountToBeSent * BigInt("2"));
-        });
-    });
+            const amountToBeSent2 = amountToBeSent * BigInt("998") * await ammContract.reserveB() / (await ammContract.reserveA() * BigInt("1000") + amountToBeSent * BigInt("998"));
 
-    describe("Swap A for B:", function () {
-        it("Should revert if passed amountIn <= 0", async function () {
-            let amountCHE = await chelseaContract.totalSupply();
-            let amountWETH = ethers.parseEther("10");
 
-            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
-            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
-
-            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
-
-            await expect(
-                ammContract.connect(user).swapAForB(BigInt("0"))
-            ).to.be.revertedWith("Invalid input amount");
-        });
-
-        it("Should revert if calculated amountOut <= 0", async function () {
-            let amountCHE = await chelseaContract.totalSupply();
-            let amountWETH = ethers.parseEther("0.000000000000001");
-
-            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
-            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
-
-            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
-
-            await expect(
-                ammContract.connect(user).swapAForB(ethers.parseEther("0.000000000000000001"))
-            ).to.be.revertedWith("Insufficient output amount");
-        });
-
-        it("Should swap A for B", async function () {
-            let amountCHE = await chelseaContract.totalSupply();
-            let amountWETH = ethers.parseEther("10");
-
-            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
-            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
-
-            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
-
-            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, ethers.parseEther("0.01"));
-            await ammContract.connect(user).swapBForA(ethers.parseEther("0.01"));
-
-            const initialChelseaBalance = await chelseaContract.balanceOf(user.address);
-            await chelseaContract.connect(user).approve(ammContract.target, initialChelseaBalance);
-            const initialWETHBalance = await wrappedSepoliaEtherContract.balanceOf(user.address);
-            const amountToBeSent = initialChelseaBalance / BigInt("2") * BigInt("998") * await ammContract.reserveB() / (await ammContract.reserveA() * BigInt("1000") + initialChelseaBalance / BigInt("2") * BigInt("998"));
-
-            await ammContract.connect(user).swapAForB(initialChelseaBalance / BigInt("2"));
-            const firstHalfPrice = await wrappedSepoliaEtherContract.balanceOf(user.address) - initialWETHBalance;
-
-            expect(await wrappedSepoliaEtherContract.balanceOf(user.address)).to.equal(amountToBeSent + initialWETHBalance);
-
-            await ammContract.connect(user).swapAForB(initialChelseaBalance - (initialChelseaBalance / BigInt("2")));
-            const secondHalfPrice = await wrappedSepoliaEtherContract.balanceOf(user.address) - initialWETHBalance - firstHalfPrice;
-
-            expect(firstHalfPrice).to.be.greaterThan(secondHalfPrice);
+            expect(await ammContract.connect(user).swap(chelseaContract.target, wrappedSepoliaEtherContract.target, amountToBeSent, BigInt("0"))).to.emit(ammContract, "Swap")
+                .withArgs(amountToBeSent, amountToBeSent2, chelsea_owner.target, wrappedSepoliaEtherContract.target);
         });
     });
 });
