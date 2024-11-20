@@ -15,7 +15,7 @@ describe("-- Wrapped Sepolia Ether Contract --", function () {
         // console.log(await ethers.provider.getBalance(user.address));
     });
 
-    describe("Sending ETH directly to the contract:", function () {
+    describe("# Sending ETH directly to the contract:", function () {
         it("Should provide the sender of ETH with an equal value of WETH", async function () {
             const userBalanceInETH0 = await ethers.provider.getBalance(user.address);
             const userBalanceInWETH0 = await wrappedSepoliaEtherContract.balanceOf(user.address);
@@ -59,7 +59,7 @@ describe("-- Wrapped Sepolia Ether Contract --", function () {
         });
     });
 
-    describe("Deposit:", function () {
+    describe("# Deposit:", function () {
         it("Should not mint WETH when sent with no value", async function () {
             const userBalanceInETH0 = await ethers.provider.getBalance(user.address);
             const userBalanceInWETH0 = await wrappedSepoliaEtherContract.balanceOf(user.address);
@@ -101,7 +101,7 @@ describe("-- Wrapped Sepolia Ether Contract --", function () {
         });
     });
 
-    describe("Withdraw:", function () {
+    describe("# Withdraw:", function () {
         it("Should revert if there is no enough balance", async function () {
             const userBalanceInWETH0 = await wrappedSepoliaEtherContract.balanceOf(user.address);
             const withdrawalAmount = userBalanceInWETH0 + ethers.parseEther("0.1");

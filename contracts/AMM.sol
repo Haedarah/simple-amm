@@ -5,9 +5,19 @@ pragma solidity ^0.8.26;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract AMM is ERC20 {
+contract AMM is ERC20, ReentrancyGuard {
     using Math for uint256;
+
+    event AddLiquidity(uint256 amountA, uint256 amountB, uint256 liquidity);
+    event RemoveLiquidity(uint256 amountA, uint256 amountB);
+    event Swap(
+        uint256 amountIn,
+        uint256 amountOut,
+        address tokenIn,
+        address tokenOut
+    );
 
     IERC20 public tokenA; //Interface for tokenA
     IERC20 public tokenB; //Interface for tokenB
@@ -23,79 +33,90 @@ contract AMM is ERC20 {
         tokenB = IERC20(_tokenB);
     }
 
-    function addLiquidity(uint256 amountA, uint256 amountB) external {
+    function addLiquidity(
+        uint256 amountA,
+        uint256 amountB
+    ) external nonReentrant {
         require(amountA > 0 && amountB > 0, "Invalid amounts");
 
         //Get the tokens that the pair consists of
         tokenA.transferFrom(msg.sender, address(this), amountA);
         tokenB.transferFrom(msg.sender, address(this), amountB);
 
-        //Calculate the Liquidity Provider Tokens to be issued for this liquidity addition
+        uint256 currentTotalSupply = totalSupply();
         uint256 liquidity;
-        if (totalSupply() == 0) {
-            liquidity = Math.sqrt(amountA * amountB);
+
+        if (currentTotalSupply == 0) {
+            liquidity = _safeSqrt(amountA * amountB);
         } else {
             liquidity = Math.min(
-                (amountA * totalSupply()) / reserveA,
-                (amountB * totalSupply()) / reserveB
+                (amountA * currentTotalSupply) / reserveA,
+                (amountB * currentTotalSupply) / reserveB
             );
         }
 
         require(liquidity > 0, "Insufficient liquidity");
-
         _mint(msg.sender, liquidity);
 
-        //Update the reserved amounts
-        reserveA += amountA;
-        reserveB += amountB;
+        _updateReserves();
+
+        emit AddLiquidity(amountA, amountB, liquidity);
     }
 
-    function removeLiquidity(uint256 liquidity) external {
+    function removeLiquidity(uint256 liquidity) external nonReentrant {
         require(
             liquidity > 0 && balanceOf(msg.sender) >= liquidity,
             "Invalid liquidity"
         );
 
-        //Calculate the Liquidity Provider Tokens to be burned for this liquidity removal
-        uint256 amountA = (liquidity * reserveA) / totalSupply();
-        uint256 amountB = (liquidity * reserveB) / totalSupply();
+        uint256 currentTotalSupply = totalSupply();
+        uint256 amountA = (liquidity * reserveA) / currentTotalSupply;
+        uint256 amountB = (liquidity * reserveB) / currentTotalSupply;
 
-        //Burn the received Liquidity Provider Tokens
         _burn(msg.sender, liquidity);
 
-        //Update the reserved amounts
-        reserveA -= amountA;
-        reserveB -= amountB;
-
-        //Send (tokenA)s and (tokenB)s back
+        // Transfer tokens and update reserves
         tokenA.transfer(msg.sender, amountA);
         tokenB.transfer(msg.sender, amountB);
+
+        _updateReserves();
+
+        emit RemoveLiquidity(amountA, amountB);
     }
 
-    function swapBForA(uint256 amountIn) external {
-        require(amountIn > 0, "Invalid input amount");
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin
+    ) external nonReentrant {
+        require(
+            tokenIn == address(tokenA) || tokenIn == address(tokenB),
+            "Invalid tokenIn"
+        );
+        require(
+            tokenOut == address(tokenA) || tokenOut == address(tokenB),
+            "Invalid tokenOut"
+        );
 
-        uint256 amountOut = getAmountOut(amountIn, reserveB, reserveA);
-        require(amountOut > 0, "Insufficient output amount");
+        (uint256 reserveIn, uint256 reserveOut) = tokenIn == address(tokenA)
+            ? (reserveA, reserveB)
+            : (reserveB, reserveA);
 
-        tokenB.transferFrom(msg.sender, address(this), amountIn);
-        tokenA.transfer(msg.sender, amountOut);
+        uint256 amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
+        require(amountOut >= amountOutMin, "Slippage tolerance exceeded");
 
-        reserveB += amountIn;
-        reserveA -= amountOut;
-    }
+        _validateAllowanceAndTransfer(
+            IERC20(tokenIn),
+            msg.sender,
+            address(this),
+            amountIn
+        );
+        IERC20(tokenOut).transfer(msg.sender, amountOut);
 
-    function swapAForB(uint256 amountIn) external {
-        require(amountIn > 0, "Invalid input amount");
+        _updateReserves();
 
-        uint256 amountOut = getAmountOut(amountIn, reserveA, reserveB);
-        require(amountOut > 0, "Insufficient output amount");
-
-        tokenA.transferFrom(msg.sender, address(this), amountIn);
-        tokenB.transfer(msg.sender, amountOut);
-
-        reserveA += amountIn;
-        reserveB -= amountOut;
+        emit Swap(amountIn, amountOut, tokenIn, tokenOut);
     }
 
     function getAmountOut(
@@ -103,9 +124,34 @@ contract AMM is ERC20 {
         uint256 reserveIn,
         uint256 reserveOut
     ) public pure returns (uint256) {
-        uint256 amountInWithFee = amountIn * 998; //0.2% fee
-        return
-            (amountInWithFee * reserveOut) /
-            (reserveIn * 1000 + amountInWithFee);
+        uint256 amountInWithFee = amountIn * 998; // Deduct 0.2% fee
+        uint256 denominator = reserveIn * 1000 + amountInWithFee;
+        return (amountInWithFee * reserveOut) / denominator;
+    }
+
+    function _safeSqrt(uint256 y) internal pure returns (uint256) {
+        if (y == 0) return 0;
+        uint256 z = (y + 1) / 2;
+        uint256 result = y;
+        while (z < result) {
+            result = z;
+            z = (y / z + z) / 2;
+        }
+        return result;
+    }
+
+    function _updateReserves() internal {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+    }
+
+    function _validateAllowanceAndTransfer(
+        IERC20 token,
+        address from,
+        address to,
+        uint256 amount
+    ) internal {
+        require(token.allowance(from, to) >= amount, "Allowance too low");
+        token.transferFrom(from, to, amount);
     }
 }
