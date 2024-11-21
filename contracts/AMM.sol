@@ -95,9 +95,11 @@ contract AMM is ERC20, ReentrancyGuard {
             "Invalid tokenIn"
         );
         require(
-            tokenOut == address(tokenA) || tokenOut == address(tokenB),
+            (tokenOut == address(tokenA) || tokenOut == address(tokenB)) &&
+                (tokenIn != tokenOut),
             "Invalid tokenOut"
         );
+        require(amountIn > 0, "Invalid amountIn");
 
         (uint256 reserveIn, uint256 reserveOut) = tokenIn == address(tokenA)
             ? (reserveA, reserveB)

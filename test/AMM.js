@@ -239,6 +239,102 @@ describe("-- AMM Contract --", function () {
     });
 
     describe("# Swap:", function () {
+        it("Should revert if amountIn is zero", async function () {
+            await expect(
+                ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, 0, BigInt("0"))
+            ).to.be.revertedWith("Invalid amountIn");
+        });
+
+        it("Should revert if tokenIn is the same as tokenOut", async function () {
+            await expect(
+                ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, wrappedSepoliaEtherContract.target, ethers.parseEther("1"), BigInt("0"))
+            ).to.be.revertedWith("Invalid tokenOut");
+        });
+
+        it("Should correctly update reserves after a swap", async function () {
+            const initialReserveA = await ammContract.reserveA();
+            const initialReserveB = await ammContract.reserveB();
+
+            const amountIn = ethers.parseEther("0.005");
+            const amountOut = await ammContract.getAmountOut(amountIn, initialReserveB, initialReserveA);
+
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, amountIn);
+            await ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, amountIn, BigInt("0"));
+
+            const finalReserveA = await ammContract.reserveA();
+            const finalReserveB = await ammContract.reserveB();
+
+            expect(finalReserveA).to.equal(initialReserveA - amountOut);
+            expect(finalReserveB).to.equal(initialReserveB + amountIn);
+        });
+
+        it("Should handle small swaps without errors", async function () {
+            let amountCHE = await chelseaContract.totalSupply();
+            let amountWETH = ethers.parseEther("10");
+
+            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
+            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
+
+            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
+
+            const amountIn = ethers.parseEther("0.0001");
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, amountIn);
+
+            const amountOut = await ammContract.getAmountOut(amountIn, await ammContract.reserveB(), await ammContract.reserveA());
+            expect(amountOut).to.be.greaterThan(0);
+
+            await expect(
+                ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, amountIn, BigInt("0"))
+            ).to.emit(ammContract, "Swap");
+        });
+
+        it("Should handle large swaps without errors", async function () {
+            let amountCHE = await chelseaContract.totalSupply();
+            let amountWETH = ethers.parseEther("10");
+
+            await chelseaContract.connect(chelsea_owner).approve(ammContract.target, amountCHE);
+            await wrappedSepoliaEtherContract.connect(chelsea_owner).approve(ammContract.target, amountWETH);
+
+            await ammContract.connect(chelsea_owner).addLiquidity(amountCHE, amountWETH);
+
+            const reserveB = await ammContract.reserveB();
+            const amountIn = reserveB / 2n;
+
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, amountIn);
+
+            const amountOut = await ammContract.getAmountOut(amountIn, reserveB, await ammContract.reserveA());
+            expect(amountOut).to.be.greaterThan(0);
+
+            await expect(
+                ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, amountIn, BigInt("0"))
+            ).to.emit(ammContract, "Swap");
+        });
+
+
+        it("Should emit Swap event with correct parameters", async function () {
+            const amountIn = ethers.parseEther("0.005");
+            const amountOut = await ammContract.getAmountOut(amountIn, await ammContract.reserveB(), await ammContract.reserveA());
+
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, amountIn);
+
+            await expect(
+                ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, amountIn, BigInt("0"))
+            ).to.emit(ammContract, "Swap")
+                .withArgs(amountIn, amountOut, wrappedSepoliaEtherContract.target, chelseaContract.target);
+        });
+
+        it("Should consume reasonable gas for swap function", async function () {
+            const amountIn = ethers.parseEther("0.01");
+            await wrappedSepoliaEtherContract.connect(user).approve(ammContract.target, amountIn);
+
+            const tx = await ammContract.connect(user).swap(wrappedSepoliaEtherContract.target, chelseaContract.target, amountIn, BigInt("0"));
+            const receipt = await tx.wait();
+
+            // console.log("Gas Used:", receipt.gasUsed.toString());
+            expect(receipt.gasUsed).to.be.lessThan(150000);
+        });
+
+
         it("Should revert if passed tokens are not in the pair", async function () {
             let amountCHE = await chelseaContract.totalSupply();
             let amountWETH = ethers.parseEther("10");
