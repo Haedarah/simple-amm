@@ -1,0 +1,26 @@
+################{Deployer Information}################
+Deploying contracts with the account: 0xF9264dB5F1888EE15C0DF970761a3B2Dc28b0fc3
+Deployer balance: 11.342029161782171862 ETH
+################{Deployment}################
+WrappedSepoliaEther is deployed to: 0x75f97391cA6810e217FE7CAFA436044225e00a22
+ChelseaToken is deployed to: 0x9673D2E708c4Fa18aADa80ad211695c8aC965ADa
+AMM is deployed to: 0xd1DB5a0ed2A545dc6371391f47Be66d81CdBe2f6
+################{Verification}################
+Waiting for Etherscan to index the contracts...
+The contract 0x75f97391cA6810e217FE7CAFA436044225e00a22 has already been verified on the block explorer. If you're trying to verify a partially verified contract, please use the --force flag.
+https://sepolia.etherscan.io/address/0x75f97391cA6810e217FE7CAFA436044225e00a22#code
+
+WrappedSepoliaEther is verified!
+The contract 0x9673D2E708c4Fa18aADa80ad211695c8aC965ADa has already been verified on the block explorer. If you're trying to verify a partially verified contract, please use the --force flag.
+https://sepolia.etherscan.io/address/0x9673D2E708c4Fa18aADa80ad211695c8aC965ADa#code
+
+ChelseasToken is verified!
+Successfully submitted source code for contract
+contracts/AMM.sol:AMM at 0xd1DB5a0ed2A545dc6371391f47Be66d81CdBe2f6
+for verification on the block explorer. Waiting for verification result...
+
+Successfully verified contract AMM on the block explorer.
+https://sepolia.etherscan.io/address/0xd1DB5a0ed2A545dc6371391f47Be66d81CdBe2f6#code
+
+AMM is verified!
+################################
