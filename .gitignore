@@ -20,3 +20,5 @@ Thumbs.db
 
 # Generated JSON files for deployment
 deployments/
+
+.env
