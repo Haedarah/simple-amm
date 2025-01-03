@@ -24,7 +24,7 @@ async function main() {
     }
 
     const provider = new ethers.JsonRpcProvider(
-        `https://sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`
+        `https://base-sepolia.infura.io/v3/${process.env.INFURA_API_KEY}`
     );
 
     const deployer = new ethers.Wallet(privateKey, provider);
@@ -94,3 +94,4 @@ function sleep(ms) {
 }
 
 //npx hardhat run scripts/Deploy.js --network sepolia
+//npx hardhat run scripts/Deploy.js --network base_sepolia
